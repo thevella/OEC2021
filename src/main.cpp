@@ -14,7 +14,7 @@
 #define UP 1
 
 #define ledPin 2
-#define buzzerPin A2
+#define buzzerPin 13
 
 AF_DCMotor driveLeft(2, MOTOR12_64KHZ);  // create driveLeft #1, 64KHz pwm
 AF_DCMotor driveRight(1, MOTOR12_64KHZ); // create driveLeft #2, 64KHz pwm
@@ -22,7 +22,7 @@ AF_DCMotor driveRight(1, MOTOR12_64KHZ); // create driveLeft #2, 64KHz pwm
 Servo sweeperMotor;
 Servo collapseMotor;
 
-Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_154MS, TCS34725_GAIN_1X);
 
 // The motors we are using have reports of being damaged when
 //     run to their endstop, these definitions limit the range
@@ -30,23 +30,26 @@ const int servoPosMax = 170;
 const int servoPosMin = 10;
 
 // First position for the sweeper
-const int sweeperOriginalPos = 45;
+const int sweeperOriginalPos = 25;
 // Steps the sweeper has to travel between sensor positions
-const int sweeperStep = 45;
+const int sweeperStep = 56;
 
 // Keep track of the position of the sweeper
 int sweeperPos = sweeperOriginalPos;
 
 
 // Speed the motors should attempt to run at (0 < driveSpeed < 255)
-const int driveSpeed = 120;
+//default 140
+const int driveSpeed = 0;
 
-int driveDelay = 300;
+int driveDelay = 430;
 
-int vecDelta = 1;
+double vecDelta = 1;
 
 double redVec[] = {0,0,0,0};
 double blueVec[] = {0,0,0,0};
+
+double* readColor();
 
 inline double vecDistance(double [], double []);
 
@@ -71,16 +74,19 @@ void calibrate(){
         if (Serial.available() > 0) {
             incommingString = Serial.readString();
 
-            if (incommingString = "exit") {
+            Serial.print(incommingString);
+            
+            if (incommingString == "exit") {
                 break;
             } else if (incommingString == "blue") {
-                int* ret = readColor();
-
+                
+                double* ret = readColor();
+              
                 for (int i = 0; i < 4; i++){
                     blueVec[i] = ret[i];
                 } 
             } else if (incommingString == "red") {
-                int* ret = readColor();
+                double* ret = readColor();
 
                 for (int i = 0; i < 4; i++){
                     redVec[i] = ret[i];
@@ -90,16 +96,17 @@ void calibrate(){
                 int incommingByte = 0;
                 while (true) {
                     if (Serial.available() > 0) {
-                        vecDelta = Serial.read();
+                        vecDelta = Serial.parseFloat();
                        break;
                     }
                 }
-            } else if (incommingString == "delay") {
+                Serial.print(vecDelta);
+            } else if (incommingString == "delay\n") {
                 Serial.println("Enter delay: ");
                 int incommingByte = 0;
                 while (true) {
                     if (Serial.available() > 0) {
-                        driveDelay = Serial.read();
+                        driveDelay = Serial.parseInt();
                        break;
                     }
                 }
@@ -112,8 +119,12 @@ void calibrate(){
 void setup()
 {
     Serial.begin(9600); // set up Serial library at 9600 bps
-    calibrate();
+    pinMode(ledPin, OUTPUT);
+    pinMode(buzzerPin, OUTPUT);
     colorSensorSetup();
+
+    
+    calibrate();
     motorSetup();
 }
 
@@ -138,6 +149,19 @@ void loop()
     sweep(UP);
     detectColor();
 
+    for (int i = 0; i < 2; i ++) {
+        driveBackward();
+
+        delay(driveDelay);
+
+        driveRelease();
+        delay(driveDelay*3);
+    }
+    sweep(DOWN);
+    sweep(DOWN);
+
+  
+
     
     
     
@@ -154,11 +178,17 @@ inline void driveLoopF()
 
 }
 
-int* readColor() {
+double* readColor() {
     uint16_t r, g, b, c, colorTemp, lux;
 
     tcs.getRawData(&r, &g, &b, &c); 
-    int* val = {r,g,b,c};
+    double* val = new double[4];
+    uint16_t val1[] = {r,g,b,c};
+
+    for (int i =0; i <4; i++){
+        val[i] = (double)val1[i]/(r+g+b+c);
+    }
+
     return val;
 }
 
@@ -170,44 +200,30 @@ inline void detectColor()
     // colorTemp = tcs.calculateColorTemperature(r, g, b);
     //colorTemp = tcs.calculateColorTemperature_dn40(r, g, b, c);
     //lux = tcs.calculateLux(r, g, b);
-    int colSum = r+g+b+c;
+    unsigned int colSum = r+g+b+c;
     double colVec[] = {((double)r)/colSum, 
                         ((double)g)/colSum, 
                         ((double)b)/colSum, 
                         ((double)c)/colSum};
-
+  
     if (vecDistance(colVec, redVec) < vecDelta) {
-        analogWrite(ledPin, HIGH);
-        analogWrite(buzzerPin, HIGH);
+        digitalWrite(ledPin, HIGH);
+        analogWrite(buzzerPin, 500);
         delay(1500);
-        analogWrite(ledPin, LOW);
-        analogWrite(buzzerPin, LOW);
+        digitalWrite(ledPin, LOW);
+        analogWrite(buzzerPin, 0);
+        Serial.println("red");
     } else if (vecDistance(colVec, blueVec) < vecDelta) {
-        analogWrite(ledPin, HIGH);
+        digitalWrite(ledPin, HIGH);
         delay(1500);
-        analogWrite(ledPin, LOW);
+        digitalWrite(ledPin, LOW);
+        Serial.println("blue");
     }
 
 #ifdef DEBUG
-    Serial.print("Color Temp: ");
-    Serial.print(colorTemp, DEC);
-    Serial.print(" K - ");
-    Serial.print("Lux: ");
-    Serial.print(lux, DEC);
-    Serial.print(" - ");
-    Serial.print("R: ");
-    Serial.print(r, DEC);
-    Serial.print(" ");
-    Serial.print("G: ");
-    Serial.print(g, DEC);
-    Serial.print(" ");
-    Serial.print("B: ");
-    Serial.print(b, DEC);
-    Serial.print(" ");
-    Serial.print("C: ");
-    Serial.print(c, DEC);
-    Serial.print(" ");
-    Serial.println(" ");
+    Serial.println(vecDistance(colVec, redVec));
+    Serial.println(vecDistance(colVec, blueVec));
+    //delay(5000);
 #endif
 }
 
@@ -244,7 +260,7 @@ inline void colorSensorSetup()
 }
 
 inline void sweep(int direction)
-{
+{   /*
     if (direction == UP)
     {
 #ifdef DEBUG
@@ -262,7 +278,7 @@ inline void sweep(int direction)
         delay(10);
         sweeperMotor.write(sweeperPos - sweeperStep);
         sweeperPos -= sweeperStep;
-    }
+    }*/
 }
 
 inline void driveForward(){
